@@ -16,6 +16,12 @@ const CHANNEL_CONTEXT_HEADING = "\n\n---\n\n## 📡 Channel-Specific Context\n\n
  *   Telegram group:   agent:main:telegram:group:-100123456789
  *   Slack channel:    agent:main:slack:channel:c0123abcdef (lowercased by session-key.ts)
  *   WhatsApp group:   agent:main:whatsapp:group:120363403215116621@g.us
+ *   Signal group:    agent:main:signal:group:abc123def456==
+ *   iMessage group:  agent:main:imessage:group:chat123456
+ *   Generic:         agent:main:<channel>:channel|group:<id>  (fallback)
+ *   Signal group:    agent:main:signal:group:abc123def456==
+ *   iMessage group:  agent:main:imessage:group:chat123456
+ *   Generic:         agent:main:<channel>:channel|group:<id>  (fallback)
  *
  * Returns the extracted ID as-is (preserving case from the session key).
  * Callers that need case-insensitive file lookup should handle that separately.
@@ -40,6 +46,24 @@ export function extractChannelId(sessionKey: string): string | null {
   const waGroup = sessionKey.match(/:whatsapp:group:([^:]+)/);
   if (waGroup) {
     return waGroup[1];
+  }
+
+  // Signal group: agent:main:signal:group:abc123def456==
+  const signalGroup = sessionKey.match(/:signal:group:([^:]+)/);
+  if (signalGroup) {
+    return signalGroup[1];
+  }
+
+  // iMessage group: agent:main:imessage:group:chat123456
+  const imessageGroup = sessionKey.match(/:imessage:group:([^:]+)/);
+  if (imessageGroup) {
+    return imessageGroup[1];
+  }
+
+  // Generic fallback for other channels: agent:main:<channel>:channel|group:<id>
+  const genericChannel = sessionKey.match(/:(\w+):(?:channel|group):([^:]+)/);
+  if (genericChannel) {
+    return genericChannel[2];
   }
 
   return null;

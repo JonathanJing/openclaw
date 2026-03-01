@@ -41,6 +41,18 @@ describe("extractChannelId", () => {
     );
   });
 
+  it("extracts Signal group id", () => {
+    expect(extractChannelId("agent:main:signal:group:abc123def456==")).toBe("abc123def456==");
+  });
+
+  it("extracts iMessage group id", () => {
+    expect(extractChannelId("agent:main:imessage:group:chat123456")).toBe("chat123456");
+  });
+
+  it("extracts generic channel id via fallback pattern", () => {
+    expect(extractChannelId("agent:main:matrix:channel:!room123:example.com")).toBe("!room123");
+  });
+
   it("returns null for DM / main session key", () => {
     expect(extractChannelId("agent:main:main")).toBeNull();
   });
