@@ -50,6 +50,11 @@ describe("extractChannelId", () => {
   });
 
   it("extracts generic channel id via fallback pattern", () => {
+    // Nextcloud Talk with hyphenated channel name
+    expect(extractChannelId("agent:main:nextcloud-talk:group:abc123")).toBe("abc123");
+  });
+
+  it("extracts generic channel id for non-hyphenated channels", () => {
     expect(extractChannelId("agent:main:matrix:channel:!room123:example.com")).toBe("!room123");
   });
 

@@ -61,7 +61,7 @@ export function extractChannelId(sessionKey: string): string | null {
   }
 
   // Generic fallback for other channels: agent:main:<channel>:channel|group:<id>
-  const genericChannel = sessionKey.match(/:(\w+):(?:channel|group):([^:]+)/);
+  const genericChannel = sessionKey.match(/:([\w-]+):(?:channel|group):([^:]+)/);
   if (genericChannel) {
     return genericChannel[2];
   }
