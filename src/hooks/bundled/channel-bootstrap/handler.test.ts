@@ -27,8 +27,12 @@ describe("extractChannelId", () => {
     expect(extractChannelId("agent:main:telegram:group:-1001234567890")).toBe("-1001234567890");
   });
 
-  it("extracts Slack channel id", () => {
+  it("extracts Slack channel id (uppercase, as stored in config)", () => {
     expect(extractChannelId("agent:main:slack:channel:C0123ABCDEF")).toBe("C0123ABCDEF");
+  });
+
+  it("extracts Slack channel id (lowercase, as normalised by session-key.ts at runtime)", () => {
+    expect(extractChannelId("agent:main:slack:channel:c0123abcdef")).toBe("c0123abcdef");
   });
 
   it("extracts WhatsApp group id", () => {
@@ -54,14 +58,15 @@ function makeContext(params: {
   workspaceDir: string;
   sessionKey: string;
   agentsMdContent?: string;
+  agentsMdMissing?: boolean;
 }): AgentBootstrapHookContext {
   const bootstrapFiles: AgentBootstrapHookContext["bootstrapFiles"] = [];
-  if (params.agentsMdContent !== undefined) {
+  if (params.agentsMdContent !== undefined || params.agentsMdMissing) {
     bootstrapFiles.push({
       name: "AGENTS.md",
       path: path.join(params.workspaceDir, "AGENTS.md"),
       content: params.agentsMdContent,
-      missing: false,
+      missing: params.agentsMdMissing ?? false,
     });
   }
   return {
@@ -96,8 +101,39 @@ describe("channel-bootstrap handler", () => {
     expect(context.bootstrapFiles.filter((f) => f.name === "AGENTS.md")).toHaveLength(1);
   });
 
-  it("injects new AGENTS.md entry when none exists but channel file is present", async () => {
-    const dir = await makeTempWorkspace("openclaw-channel-bootstrap-new-entry-");
+  it("does not mutate the original cached entry (clone on write)", async () => {
+    const dir = await makeTempWorkspace("openclaw-channel-bootstrap-clone-");
+    const channelsDir = path.join(dir, "channels");
+    await fs.mkdir(channelsDir, { recursive: true });
+    await fs.writeFile(path.join(channelsDir, "123456.md"), "Channel only.", "utf-8");
+
+    const originalEntry = {
+      name: "AGENTS.md" as const,
+      path: path.join(dir, "AGENTS.md"),
+      content: "Global.",
+      missing: false,
+    };
+    const context = makeContext({
+      workspaceDir: dir,
+      sessionKey: "agent:main:discord:channel:123456",
+      agentsMdContent: "Global.",
+    });
+    // Replace with known reference so we can check identity
+    context.bootstrapFiles[0] = originalEntry;
+
+    const event = createHookEvent("agent", "bootstrap", context.sessionKey, context);
+    await handler(event);
+
+    // The slot in the array should be a new object, not the original reference
+    expect(context.bootstrapFiles[0]).not.toBe(originalEntry);
+    // Original entry content must be untouched
+    expect(originalEntry.content).toBe("Global.");
+    // New entry should have the appended content
+    expect(context.bootstrapFiles[0].content).toContain("Channel only.");
+  });
+
+  it("injects new non-missing AGENTS.md entry when only a missing placeholder exists", async () => {
+    const dir = await makeTempWorkspace("openclaw-channel-bootstrap-missing-");
     const channelsDir = path.join(dir, "channels");
     await fs.mkdir(channelsDir, { recursive: true });
     await fs.writeFile(path.join(channelsDir, "999.md"), "Channel only.", "utf-8");
@@ -105,20 +141,23 @@ describe("channel-bootstrap handler", () => {
     const context = makeContext({
       workspaceDir: dir,
       sessionKey: "agent:main:discord:channel:999",
-      // no agentsMdContent → no AGENTS.md entry
+      agentsMdMissing: true,
     });
 
     const event = createHookEvent("agent", "bootstrap", context.sessionKey, context);
     await handler(event);
 
-    const agents = context.bootstrapFiles.find((f) => f.name === "AGENTS.md");
-    expect(agents).toBeDefined();
-    expect(agents!.content).toContain("Channel only.");
+    const nonMissingAgents = context.bootstrapFiles.filter(
+      (f) => f.name === "AGENTS.md" && !f.missing,
+    );
+    expect(nonMissingAgents).toHaveLength(1);
+    expect(nonMissingAgents[0].content).toContain("Channel only.");
+    expect(nonMissingAgents[0].path).toContain("AGENTS.md");
+    expect(nonMissingAgents[0].path).not.toContain("channels");
   });
 
   it("silently skips and does not modify bootstrap files when no channel file exists", async () => {
     const dir = await makeTempWorkspace("openclaw-channel-bootstrap-skip-");
-    // no channels/ dir at all
 
     const context = makeContext({
       workspaceDir: dir,
@@ -158,7 +197,6 @@ describe("channel-bootstrap handler", () => {
       agentsMdContent: "Global.",
     });
 
-    // command:new is not agent:bootstrap
     const event = createHookEvent("command", "new", context.sessionKey, context as never);
     await handler(event as never);
 

@@ -14,7 +14,7 @@ const CHANNEL_CONTEXT_HEADING = "\n\n---\n\n## 📡 Channel-Specific Context\n\n
  *   Discord channel:  agent:main:discord:channel:123456
  *   Discord thread:   agent:main:discord:channel:123456:thread:789  → 123456
  *   Telegram group:   agent:main:telegram:group:-100123456789
- *   Slack channel:    agent:main:slack:channel:C0123ABCDEF
+ *   Slack channel:    agent:main:slack:channel:c0123abcdef (lowercased by session-key.ts)
  *   WhatsApp group:   agent:main:whatsapp:group:120363403215116621@g.us
  */
 export function extractChannelId(sessionKey: string): string | null {
@@ -28,7 +28,8 @@ export function extractChannelId(sessionKey: string): string | null {
     return telegramGroup[1];
   }
 
-  const slackChannel = sessionKey.match(/:slack:channel:([A-Z0-9]+)/);
+  // Case-insensitive: session-key.ts lowercases peerId, so Slack IDs may be lowercase at runtime
+  const slackChannel = sessionKey.match(/:slack:channel:([A-Z0-9]+)/i);
   if (slackChannel) {
     return slackChannel[1];
   }
@@ -70,14 +71,25 @@ const channelBootstrapHook: HookHandler = async (event) => {
     return;
   }
 
-  const agentsEntry = bootstrapFiles.find((f) => f.name === "AGENTS.md");
-  if (agentsEntry) {
-    agentsEntry.content = (agentsEntry.content ?? "") + CHANNEL_CONTEXT_HEADING + channelContent;
+  // Find an existing, non-missing AGENTS.md entry to append to.
+  // We must not mutate the cached entry in place (bootstrap-cache.ts reuses the same
+  // array across agent:bootstrap calls within a session), so we replace the entry with
+  // a shallow clone that carries the updated content.
+  const agentsIndex = bootstrapFiles.findIndex((f) => f.name === "AGENTS.md" && !f.missing);
+  if (agentsIndex !== -1) {
+    const original = bootstrapFiles[agentsIndex];
+    bootstrapFiles[agentsIndex] = {
+      ...original,
+      content: (original.content ?? "") + CHANNEL_CONTEXT_HEADING + channelContent,
+    };
     log.debug(`appended channel context for ${channelId} to AGENTS.md`);
   } else {
+    // Either AGENTS.md is absent or marked missing — inject as a new, non-missing entry.
+    // Use the workspace AGENTS.md path (not the channel file) so the system-prompt heading
+    // renders correctly (src/agents/system-prompt.ts reads path as the section heading).
     bootstrapFiles.push({
       name: "AGENTS.md",
-      path: channelFile,
+      path: path.join(workspaceDir, "AGENTS.md"),
       content: `## 📡 Channel-Specific Context\n\n${channelContent}`,
       missing: false,
     });
