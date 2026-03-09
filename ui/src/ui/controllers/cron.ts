@@ -139,7 +139,8 @@ export function validateCronForm(form: CronFormState): CronFieldErrors {
     const timeoutRaw = form.timeoutSeconds.trim();
     if (timeoutRaw) {
       const timeout = toNumber(timeoutRaw, 0);
-      if (timeout <= 0) {
+      // 0 = no timeout, > 0 = timeout in seconds
+      if (timeout !== 0 && timeout <= 0) {
         errors.timeoutSeconds = "cron.errors.timeoutInvalid";
       }
     }
