@@ -9,7 +9,7 @@ import {
 import { log } from "./logger.js";
 import { streamWithPayloadPatch } from "./stream-payload-utils.js";
 
-// Note: 1M context is now GA (General Availability) as of March 2025.
+// Note: 1M context is now GA (General Availability) as of March 2026.
 // The context-1m-2025-08-07 beta header is no longer required.
 // Keeping ANTHROPIC_1M_MODEL_PREFIXES for context window detection.
 const ANTHROPIC_1M_MODEL_PREFIXES = ["claude-opus-4", "claude-sonnet-4"] as const;
