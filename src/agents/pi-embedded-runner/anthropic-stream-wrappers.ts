@@ -245,7 +245,7 @@ export function resolveAnthropicBetas(
   }
 
   // Note: 1M context is now GA. We no longer inject the context-1m beta header.
-  // The context1m param is still checked here for potential future use or warnings.
+  // The context1m parameter is still checked here for potential future use or warnings.
   if (extraParams?.context1m === true && !isAnthropic1MModel(modelId)) {
     log.warn(`ignoring context1m for non-opus/sonnet model: ${provider}/${modelId}`);
   }
