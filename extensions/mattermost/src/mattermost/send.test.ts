@@ -541,7 +541,7 @@ describe("sendMessageMattermost user-first resolution", () => {
     );
   });
 
-  it("opts.dmRetryOptions overrides account config dmChannelRetry", async () => {
+  it("opts.dmRetryOptions overrides provided fields and preserves account defaults", async () => {
     const userId = "hhhhhh8888888888hhhhhh8888"; // 26 chars
     mockState.resolveMattermostAccount.mockReturnValue({
       accountId: "default",
@@ -569,6 +569,13 @@ describe("sendMessageMattermost user-first resolution", () => {
       {},
       ["bot-id", userId],
       expect.objectContaining(overrideOptions),
+    );
+    expect(mockState.createMattermostDirectChannelWithRetry).toHaveBeenCalledWith(
+      {},
+      ["bot-id", userId],
+      expect.objectContaining({
+        initialDelayMs: 1000,
+      }),
     );
   });
 });

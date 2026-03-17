@@ -193,6 +193,31 @@ type ResolveTargetChannelIdParams = {
   logger?: { debug?: (msg: string) => void; warn?: (msg: string) => void };
 };
 
+function mergeDmRetryOptions(
+  base?: CreateDmChannelRetryOptions,
+  override?: CreateDmChannelRetryOptions,
+): CreateDmChannelRetryOptions | undefined {
+  const merged: CreateDmChannelRetryOptions = {
+    maxRetries: override?.maxRetries ?? base?.maxRetries,
+    initialDelayMs: override?.initialDelayMs ?? base?.initialDelayMs,
+    maxDelayMs: override?.maxDelayMs ?? base?.maxDelayMs,
+    timeoutMs: override?.timeoutMs ?? base?.timeoutMs,
+    onRetry: override?.onRetry,
+  };
+
+  if (
+    merged.maxRetries === undefined &&
+    merged.initialDelayMs === undefined &&
+    merged.maxDelayMs === undefined &&
+    merged.timeoutMs === undefined &&
+    merged.onRetry === undefined
+  ) {
+    return undefined;
+  }
+
+  return merged;
+}
+
 async function resolveTargetChannelId(params: ResolveTargetChannelIdParams): Promise<string> {
   if (params.target.kind === "channel") {
     return params.target.id;
@@ -284,17 +309,15 @@ async function resolveMattermostSendContext(
         ? { kind: "channel" as const, id: opaqueTarget.id }
         : parseMattermostTarget(trimmedTo);
   // Build retry options from account config, allowing opts to override
-  const accountRetryConfig = account.config.dmChannelRetry;
-  const dmRetryOptions: CreateDmChannelRetryOptions | undefined =
-    opts.dmRetryOptions ??
-    (accountRetryConfig
-      ? {
-          maxRetries: accountRetryConfig.maxRetries,
-          initialDelayMs: accountRetryConfig.initialDelayMs,
-          maxDelayMs: accountRetryConfig.maxDelayMs,
-          timeoutMs: accountRetryConfig.timeoutMs,
-        }
-      : undefined);
+  const accountRetryConfig: CreateDmChannelRetryOptions | undefined = account.config.dmChannelRetry
+    ? {
+        maxRetries: account.config.dmChannelRetry.maxRetries,
+        initialDelayMs: account.config.dmChannelRetry.initialDelayMs,
+        maxDelayMs: account.config.dmChannelRetry.maxDelayMs,
+        timeoutMs: account.config.dmChannelRetry.timeoutMs,
+      }
+    : undefined;
+  const dmRetryOptions = mergeDmRetryOptions(accountRetryConfig, opts.dmRetryOptions);
 
   const channelId = await resolveTargetChannelId({
     target,

@@ -190,6 +190,47 @@ export type CreateDmChannelRetryOptions = {
   onRetry?: (attempt: number, delayMs: number, error: Error) => void;
 };
 
+const RETRYABLE_NETWORK_ERROR_CODES = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ETIMEDOUT",
+  "ESOCKETTIMEDOUT",
+  "ECONNABORTED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "EPIPE",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_DNS_RESOLVE_FAILED",
+  "UND_ERR_CONNECT",
+  "UND_ERR_SOCKET",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+]);
+
+const RETRYABLE_NETWORK_ERROR_NAMES = new Set([
+  "AbortError",
+  "TimeoutError",
+  "ConnectTimeoutError",
+  "HeadersTimeoutError",
+  "BodyTimeoutError",
+]);
+
+const RETRYABLE_NETWORK_MESSAGE_SNIPPETS = [
+  "network error",
+  "timeout",
+  "timed out",
+  "abort",
+  "connection refused",
+  "econnreset",
+  "econnrefused",
+  "etimedout",
+  "enotfound",
+  "socket hang up",
+  "getaddrinfo",
+];
+
 /**
  * Creates a Mattermost DM channel with exponential backoff retry logic.
  * Retries on transient errors (429, 5xx, network errors) but not on
@@ -255,27 +296,37 @@ export async function createMattermostDirectChannelWithRetry(
 }
 
 function isRetryableError(error: Error): boolean {
-  const message = error.message.toLowerCase();
+  const candidates = collectErrorCandidates(error);
+  const messages = candidates
+    .map((candidate) => readErrorMessage(candidate)?.toLowerCase())
+    .filter((message): message is string => Boolean(message));
 
   // Retry on 5xx server errors FIRST (before checking 4xx)
   // Use "mattermost api" prefix to avoid matching port numbers (e.g., :443) or IP octets
   // This prevents misclassification when a 5xx error detail contains a 4xx substring
   // e.g., "Mattermost API 503: upstream returned 404"
-  if (/mattermost api 5\d{2}\b/.test(message)) {
+  if (messages.some((message) => /mattermost api 5\d{2}\b/.test(message))) {
     return true;
   }
 
   // Check for explicit 429 rate limiting FIRST (before generic "429" text match)
   // This avoids retrying when error detail contains "429" but it's not the status code
-  if (/mattermost api 429\b/.test(message) || message.includes("too many requests")) {
+  if (
+    messages.some(
+      (message) => /mattermost api 429\b/.test(message) || message.includes("too many requests"),
+    )
+  ) {
     return true;
   }
 
   // Check for explicit 4xx status codes - these are client errors and should NOT be retried
   // (except 429 which is handled above)
   // Use "mattermost api" prefix to avoid matching port numbers like :443
-  const clientErrorMatch = message.match(/mattermost api (4\d{2})\b/);
-  if (clientErrorMatch) {
+  for (const message of messages) {
+    const clientErrorMatch = message.match(/mattermost api (4\d{2})\b/);
+    if (!clientErrorMatch) {
+      continue;
+    }
     const statusCode = parseInt(clientErrorMatch[1], 10);
     if (statusCode >= 400 && statusCode < 500) {
       return false;
@@ -286,25 +337,95 @@ function isRetryableError(error: Error): boolean {
   // This avoids false positives like:
   // - "400 Bad Request: connection timed out" (has status code)
   // - "connect ECONNRESET 104.18.32.10:443" (has port number, not status)
-  const hasMattermostApiStatusCode = /mattermost api \d{3}\b/.test(message);
+  const hasMattermostApiStatusCode = messages.some((message) =>
+    /mattermost api \d{3}\b/.test(message),
+  );
   if (hasMattermostApiStatusCode) {
     return false;
   }
 
-  // Retry on network/transient errors (no explicit HTTP status code in message)
-  const retryablePatterns = [
-    "network error",
-    "timeout",
-    "abort",
-    "connection refused",
-    "econnreset",
-    "econnrefused",
-    "etimedout",
-    "enotfound",
-    "socket hang up",
-  ];
+  const codes = candidates
+    .map((candidate) => readErrorCode(candidate))
+    .filter((code): code is string => Boolean(code));
+  if (codes.some((code) => RETRYABLE_NETWORK_ERROR_CODES.has(code))) {
+    return true;
+  }
 
-  return retryablePatterns.some((pattern) => message.includes(pattern));
+  const names = candidates
+    .map((candidate) => readErrorName(candidate))
+    .filter((name): name is string => Boolean(name));
+  if (names.some((name) => RETRYABLE_NETWORK_ERROR_NAMES.has(name))) {
+    return true;
+  }
+
+  return messages.some((message) =>
+    RETRYABLE_NETWORK_MESSAGE_SNIPPETS.some((pattern) => message.includes(pattern)),
+  );
+}
+
+function collectErrorCandidates(error: unknown): unknown[] {
+  const queue: unknown[] = [error];
+  const seen = new Set<unknown>();
+  const candidates: unknown[] = [];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || seen.has(current)) {
+      continue;
+    }
+    seen.add(current);
+    candidates.push(current);
+
+    if (typeof current !== "object") {
+      continue;
+    }
+
+    const nested = current as {
+      cause?: unknown;
+      reason?: unknown;
+      errors?: unknown;
+    };
+    queue.push(nested.cause, nested.reason);
+    if (Array.isArray(nested.errors)) {
+      queue.push(...nested.errors);
+    }
+  }
+
+  return candidates;
+}
+
+function readErrorMessage(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") {
+    return undefined;
+  }
+  const message = (error as { message?: unknown }).message;
+  return typeof message === "string" && message.trim() ? message : undefined;
+}
+
+function readErrorName(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") {
+    return undefined;
+  }
+  const name = (error as { name?: unknown }).name;
+  return typeof name === "string" && name.trim() ? name : undefined;
+}
+
+function readErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") {
+    return undefined;
+  }
+  const { code, errno } = error as {
+    code?: unknown;
+    errno?: unknown;
+  };
+  const raw = typeof code === "string" && code.trim() ? code : errno;
+  if (typeof raw === "string" && raw.trim()) {
+    return raw.trim().toUpperCase();
+  }
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return String(raw);
+  }
+  return undefined;
 }
 
 function sleep(ms: number): Promise<void> {

@@ -1,9 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import {
-  createMattermostClient,
-  createMattermostDirectChannelWithRetry,
-  type CreateDmChannelRetryOptions,
-} from "./client.js";
+import { createMattermostClient, createMattermostDirectChannelWithRetry } from "./client.js";
 
 describe("createMattermostDirectChannelWithRetry", () => {
   const mockFetch = vi.fn();
@@ -18,6 +14,13 @@ describe("createMattermostDirectChannelWithRetry", () => {
       botToken: "test-token",
       fetchImpl: mockFetch as unknown as typeof fetch,
     });
+  }
+
+  function createFetchFailedError(params: { message: string; code?: string }): TypeError {
+    const cause = Object.assign(new Error(params.message), {
+      code: params.code,
+    });
+    return Object.assign(new TypeError("fetch failed"), { cause });
   }
 
   it("succeeds on first attempt without retries", async () => {
@@ -176,6 +179,32 @@ describe("createMattermostDirectChannelWithRetry", () => {
 
     expect(result.id).toBe("dm-channel-abc");
     expect(mockFetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries on fetch failed errors when the cause carries a transient code", async () => {
+    mockFetch
+      .mockRejectedValueOnce(
+        createFetchFailedError({
+          message: "connect ECONNREFUSED 127.0.0.1:81",
+          code: "ECONNREFUSED",
+        }),
+      )
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ id: "dm-channel-fetch-failed" }),
+      } as Response);
+
+    const client = createMockClient();
+
+    const result = await createMattermostDirectChannelWithRetry(client, ["user-1", "user-2"], {
+      maxRetries: 3,
+      initialDelayMs: 10,
+    });
+
+    expect(result.id).toBe("dm-channel-fetch-failed");
+    expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
   it("does not retry on 4xx client errors (except 429)", async () => {
