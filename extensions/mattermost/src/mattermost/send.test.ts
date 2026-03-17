@@ -80,6 +80,7 @@ describe("sendMessageMattermost", () => {
       accountId: "default",
       botToken: "bot-token",
       baseUrl: "https://mattermost.example.com",
+      config: {},
     });
     mockState.loadOutboundMediaFromUrl.mockReset();
     mockState.createMattermostClient.mockReset();
